@@ -6,16 +6,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pytorch3d.io import load_objs_as_meshes
+from pytorch3d.ops import interpolate_face_attributes
 from pytorch3d.renderer.blending import BlendParams
-from pytorch3d.renderer.cameras import (FoVPerspectiveCameras,
-                                        look_at_view_transform)
-from pytorch3d.renderer.lighting import (AmbientLights, DirectionalLights,
-                                         PointLights)
-from pytorch3d.renderer.mesh.rasterizer import (MeshRasterizer,
-                                                RasterizationSettings)
+from pytorch3d.renderer.cameras import (
+    FoVPerspectiveCameras,
+    look_at_view_transform,
+)
+from pytorch3d.renderer.lighting import (
+    AmbientLights,
+    DirectionalLights,
+    PointLights,
+)
+from pytorch3d.renderer.mesh.rasterizer import (
+    MeshRasterizer,
+    RasterizationSettings,
+)
 from pytorch3d.renderer.mesh.renderer import MeshRenderer
-from pytorch3d.renderer.mesh.shader import (SoftPhongShader,
-                                            SoftSilhouetteShader)
+from pytorch3d.renderer.mesh.shader import SoftPhongShader, SoftSilhouetteShader
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -67,7 +74,7 @@ def plot_image_grid(
     )
 
     for ax, im in zip(axarr.ravel(), images):
-        if mode == "rgb":
+        if mode in ["rgb", "normals"]:
             # only render RGB channels
             ax.imshow(im[..., :3])
         elif mode == "depth":
@@ -97,7 +104,7 @@ class CameraInterface:
         lights,
         sigma=1e-4 / 3,
         faces_per_pixel=50,
-        mode=["rgb", "depth", "silhouette"],
+        mode=["rgb", "depth", "normals", "silhouette"],
         bg_color=(0.0, 0.0, 0.0),
     ):
 
@@ -129,7 +136,12 @@ class CameraInterface:
         self.renderers = []
         self.mode = mode
         for mode in mode:
-            assert mode in ["rgb", "depth", "silhouette"], "Unsupported type."
+            assert mode in [
+                "rgb",
+                "depth",
+                "normals",
+                "silhouette",
+            ], "Unsupported type."
             self.renderers.append(getattr(self, f"init_{mode}_renderer")())
 
     def update_camera(self, cam_dist, elevation, azimuth):
@@ -179,6 +191,9 @@ class CameraInterface:
         )
         return depth_rasterizer
 
+    def init_normals_renderer(self, camera=None):
+        return self.init_depth_renderer(camera=camera)
+
     def init_silhouette_renderer(self, camera=None):
         if camera is None:
             camera = self.cameras
@@ -191,6 +206,15 @@ class CameraInterface:
             ),
         )
         return silhouette_renderer
+
+    def fetch_normals(self, meshes, fragments):
+        vtx_normals = meshes.verts_normals_packed()
+        faces = meshes.faces_packed()
+        faces_normals = vtx_normals[faces]
+        pixel_normals = interpolate_face_attributes(
+            fragments.pix_to_face, fragments.bary_coords, faces_normals
+        )
+        return pixel_normals[:, :, :, 0, :]
 
     def update_lights(self, lights):
         self.lights = lights
@@ -206,6 +230,8 @@ class CameraInterface:
             results[mode] = renderer(meshes, cameras=cameras, lights=lights)
             if mode == "depth":
                 results[mode] = results[mode].zbuf[:, :, :, :1]
+            if mode == "normals":
+                results["normals"] = self.fetch_normals(meshes, results[mode])
             if vis:
                 for nc in range(math.ceil(math.sqrt(self.num_cameras)), 0, -1):
                     nr = int(self.num_cameras / nc)
@@ -257,6 +283,3 @@ if __name__ == "__main__":
 
     meshes = mesh.extend(num_views)
     outcome = camera.render(meshes, vis=True)
-    import ipdb
-
-    ipdb.set_trace()

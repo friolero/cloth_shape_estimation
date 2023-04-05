@@ -91,7 +91,7 @@ if __name__ == "__main__":
         elevation,
         azimuth,
         lights,
-        mode=["rgb", "depth"],
+        mode=["rgb", "depth", "normals"],
     )
     _ = camera.render(tplt_mesh.extend(len(elevation)), vis=True)
     tgt_render = camera.render(tgt_mesh.extend(len(elevation)), vis=True)
@@ -107,16 +107,18 @@ if __name__ == "__main__":
     mask_tgt = True
     w_rgb = 1.0
     w_depth = 2.0
+    w_normals = 2.0
     w_chamfer = 2.0
     w_edge = 0.0  # not effective
-    w_normal = 0.01
+    w_mesh_normal = 0.01
     w_laplacian = 0  # 0.1
     rgb_losses = []
     depth_losses = []
+    normals_losses = []
     chamfer_losses = []
     laplacian_losses = []
     edge_losses = []
-    normal_losses = []
+    mesh_normal_losses = []
     loop = tqdm(range(n_iter))
 
     # TODO: (1) change texture with unique texture mapping; (2) add lr scheduler
@@ -131,40 +133,47 @@ if __name__ == "__main__":
         diff_depth = torch.abs(
             tgt_render["depth"].float() - dfm_render["depth"].float()
         )
+        diff_normals = torch.abs(
+            tgt_render["normals"].float() - dfm_render["normals"].float()
+        )
         if mask_tgt:
             mask = tgt_render["depth"] > 0
             diff_rgb *= mask
             diff_depth *= mask
+            diff_normals *= mask
         loss_rgb = diff_rgb.mean()
         loss_depth = diff_depth.mean()
+        loss_normals = diff_normals.mean()
 
         tgt_sample = sample_points_from_meshes(tgt_mesh, 5000)
         dfm_sample = sample_points_from_meshes(dfm_mesh, 5000)
 
         loss_chamfer, _ = chamfer_distance(tgt_sample, dfm_sample)
         loss_edge = mesh_edge_loss(dfm_mesh)
-        loss_normal = mesh_normal_consistency(dfm_mesh)
+        loss_mesh_normal = mesh_normal_consistency(dfm_mesh)
         loss_laplacian = mesh_laplacian_smoothing(dfm_mesh, method="uniform")
 
         rgb_losses.append(float(loss_rgb.detach().cpu()))
         depth_losses.append(float(loss_depth.detach().cpu()))
+        normals_losses.append(float(loss_normals.detach().cpu()))
         chamfer_losses.append(float(loss_chamfer.detach().cpu()))
         edge_losses.append(float(loss_edge.detach().cpu()))
-        normal_losses.append(float(loss_normal.detach().cpu()))
+        mesh_normal_losses.append(float(loss_mesh_normal.detach().cpu()))
         laplacian_losses.append(float(loss_laplacian.detach().cpu()))
         loss = (
             loss_rgb * w_rgb
             + loss_depth * w_depth
+            + loss_normals * w_normals
             + loss_chamfer * w_chamfer
             + loss_edge * w_edge
-            + loss_normal * w_normal
+            + loss_mesh_normal * w_mesh_normal
             + loss_laplacian * w_laplacian
         )
         loop.set_description("total_loss = %.6f" % loss)
         if i % plot_period == 0:
             # plot_pointcloud(dfm_mesh, title=f"iter: {i}")
             with torch.no_grad():
-                dfm_rgb, dfm_depth = camera.render(
+                vis_render = camera.render(
                     dfm_mesh.extend(len(elevation)), vis=True
                 )
 
