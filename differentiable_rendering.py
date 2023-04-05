@@ -6,15 +6,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pytorch3d.io import load_objs_as_meshes
-from pytorch3d.renderer.cameras import (FoVPerspectiveCameras,
-                                        look_at_view_transform)
-from pytorch3d.renderer.lighting import (AmbientLights, DirectionalLights,
-                                         PointLights)
-from pytorch3d.renderer.mesh.rasterizer import (MeshRasterizer,
-                                                RasterizationSettings)
+from pytorch3d.renderer.blending import BlendParams
+from pytorch3d.renderer.cameras import (
+    FoVPerspectiveCameras,
+    look_at_view_transform,
+)
+from pytorch3d.renderer.lighting import (
+    AmbientLights,
+    DirectionalLights,
+    PointLights,
+)
+from pytorch3d.renderer.mesh.rasterizer import (
+    MeshRasterizer,
+    RasterizationSettings,
+)
 from pytorch3d.renderer.mesh.renderer import MeshRenderer
-from pytorch3d.renderer.mesh.shader import (SoftDepthShader, SoftPhongShader,
-                                            SoftSilhouetteShader)
+from pytorch3d.renderer.mesh.shader import SoftPhongShader, SoftSilhouetteShader
 
 base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
 cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
@@ -34,7 +41,7 @@ def plot_image_grid(
     cols=None,
     fill: bool = True,
     show_axes: bool = False,
-    rgb: bool = True,
+    mode: str = "rgb",
     display: bool = False,
 ):
     """
@@ -69,12 +76,18 @@ def plot_image_grid(
     )
 
     for ax, im in zip(axarr.ravel(), images):
-        if rgb:
+        if mode == "rgb":
             # only render RGB channels
             ax.imshow(im[..., :3])
+        elif mode == "depth":
+            norm_im = im - im[..., 0].min() / (
+                im[..., 0].max() - im[..., 0].min()
+            )
+            ax.imshow(im[..., 0])
+            ax.imshow(norm_im[..., 0])
         else:
             # only render Alpha channel
-            ax.imshow(im[..., -1])
+            ax.imshow(im[..., 3])
         if not show_axes:
             ax.set_axis_off()
     if display:
@@ -93,6 +106,7 @@ class CameraInterface:
         sigma=1e-4 / 3,
         faces_per_pixel=50,
         modes=["rgb", "depth", "silhouette"],
+        bg_color=(0.0, 0.0, 0.0),
     ):
 
         self.device = device
@@ -102,6 +116,10 @@ class CameraInterface:
         self.sigma = sigma
         self.blur_radius = np.log(1.0 / 1e-4 - 1.0) * self.sigma
         self.faces_per_pixel = faces_per_pixel
+        self.blend_params = BlendParams()
+        self.blend_params = self.blend_params._replace(
+            background_color=bg_color
+        )
         self.update_camera(cam_dist, elevation, azimuth)
 
         self.hard_raster_settings = RasterizationSettings(
@@ -144,6 +162,7 @@ class CameraInterface:
             shader=SoftPhongShader(
                 device=self.device,
                 cameras=camera,
+                blend_params=self.blend_params,
             ),
         )
         return rgb_renderer
@@ -151,6 +170,8 @@ class CameraInterface:
     def init_depth_renderer(self, camera=None):
         if camera is None:
             camera = self.cameras
+        """
+        # This is not working as intended. Do not use but use z-buffer directly
         depth_renderer = MeshRenderer(
             rasterizer=MeshRasterizer(
                 raster_settings=self.soft_raster_settings
@@ -160,7 +181,11 @@ class CameraInterface:
                 cameras=camera,
             ),
         )
-        return depth_renderer
+        """
+        depth_rasterizer = MeshRasterizer(
+            cameras=camera, raster_settings=self.soft_raster_settings
+        )
+        return depth_rasterizer
 
     def init_silhouette_renderer(self, camera=None):
         if camera is None:
@@ -169,14 +194,16 @@ class CameraInterface:
             rasterizer=MeshRasterizer(
                 cameras=camera, raster_settings=self.soft_raster_settings
             ),
-            shader=SoftSilhouetteShader(),
+            shader=SoftSilhouetteShader(
+                blend_params=self.blend_params,
+            ),
         )
         return silhouette_renderer
 
     def update_lights(self, lights):
         self.lights = lights
 
-    def render(self, meshes, cameras=None, lights=None, vis=False):
+    def render(self, meshes, cameras=None, lights=None, vis=False, mask=True):
         if cameras is None:
             cameras = self.cameras
         if lights is None:
@@ -185,6 +212,13 @@ class CameraInterface:
         results = {}
         for mode, renderer in zip(self.modes, self.renderers):
             results[mode] = renderer(meshes, cameras=cameras, lights=lights)
+            if mode == "depth":
+                results[mode] = results[mode].zbuf[:, :, :, :1]
+                results[mode] = (results[mode] * 1000).short()  # m -> mm unit
+            if mask:
+                print("Before", results[mode].min())
+                results[mode] = torch.nn.ReLU()(results[mode])
+                print("After", results[mode].min())
             if vis:
                 print(f"==> {mode}")
                 for nc in range(math.ceil(math.sqrt(self.num_cameras)), 0, -1):
@@ -195,10 +229,25 @@ class CameraInterface:
                     results[mode].cpu().numpy(),
                     rows=nr,
                     cols=nc,
-                    rgb=(mode == "rgb"),
+                    mode=mode,
                     display=True,
                 )
         return results
+
+
+def init_lighting(mode, device, **kwargs):
+    assert mode in ["point", "directional", "ambient"], "Wrong lighting mode"
+    if mode == "point":
+        lights = PointLights(
+            device=device, location=[[0.0, 0.0, -3.0]], **kwargs
+        )
+    elif mode == "directional":
+        lights = DirectionalLights(device=device)
+    elif mode == "ambient":
+        lights = AmbientLights(
+            device=device, ambient_color=np.random.uniform(size=3), **kwargs
+        )
+    return lights
 
 
 if __name__ == "__main__":
@@ -211,18 +260,13 @@ if __name__ == "__main__":
     image_size = 512
     elevation = torch.linspace(0, 360, num_views)
     azimuth = torch.linspace(-180, 180, num_views)
-    # lights = PointLights(device=device, location=[[0.0, 0.0, -3.0]])
-    lights = DirectionalLights(device=device)
-    # lights = AmbientLights(
-    #    device=device, ambient_color=np.random.uniform(size=3)
-    # )
+    lights = init_lighting(mode="point", device=device)
     camera = CameraInterface(
         device, image_size, cam_dist, elevation, azimuth, lights
     )
 
     meshes = mesh.extend(num_views)
-    outcome = camera.render(meshes, vis=True)
-
+    outcome = camera.render(meshes, vis=True, mask=True)
     import ipdb
 
     ipdb.set_trace()
