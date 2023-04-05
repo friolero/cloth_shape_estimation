@@ -7,26 +7,15 @@ import numpy as np
 import torch
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.renderer.blending import BlendParams
-from pytorch3d.renderer.cameras import (
-    FoVPerspectiveCameras,
-    look_at_view_transform,
-)
-from pytorch3d.renderer.lighting import (
-    AmbientLights,
-    DirectionalLights,
-    PointLights,
-)
-from pytorch3d.renderer.mesh.rasterizer import (
-    MeshRasterizer,
-    RasterizationSettings,
-)
+from pytorch3d.renderer.cameras import (FoVPerspectiveCameras,
+                                        look_at_view_transform)
+from pytorch3d.renderer.lighting import (AmbientLights, DirectionalLights,
+                                         PointLights)
+from pytorch3d.renderer.mesh.rasterizer import (MeshRasterizer,
+                                                RasterizationSettings)
 from pytorch3d.renderer.mesh.renderer import MeshRenderer
-from pytorch3d.renderer.mesh.shader import SoftPhongShader, SoftSilhouetteShader
-
-base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
-cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
-rand_obj_files = glob.glob(f"{base_dir}/perturb*.obj")
-
+from pytorch3d.renderer.mesh.shader import (SoftPhongShader,
+                                            SoftSilhouetteShader)
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -70,6 +59,8 @@ def plot_image_grid(
     fig, axarr = plt.subplots(
         rows, cols, gridspec_kw=gridspec_kw, figsize=(15, 9)
     )
+    if (rows == 1) and (cols == 1):
+        axarr = np.array([axarr], dtype=np.object)
     bleed = 0
     fig.subplots_adjust(
         left=bleed, bottom=bleed, right=(1 - bleed), top=(1 - bleed)
@@ -91,6 +82,7 @@ def plot_image_grid(
         if not show_axes:
             ax.set_axis_off()
     if display:
+        ax.set_title(mode)
         plt.show()
 
 
@@ -105,7 +97,7 @@ class CameraInterface:
         lights,
         sigma=1e-4 / 3,
         faces_per_pixel=50,
-        modes=["rgb", "depth", "silhouette"],
+        mode=["rgb", "depth", "silhouette"],
         bg_color=(0.0, 0.0, 0.0),
     ):
 
@@ -135,8 +127,8 @@ class CameraInterface:
         )
 
         self.renderers = []
-        self.modes = modes
-        for mode in modes:
+        self.mode = mode
+        for mode in mode:
             assert mode in ["rgb", "depth", "silhouette"], "Unsupported type."
             self.renderers.append(getattr(self, f"init_{mode}_renderer")())
 
@@ -203,30 +195,24 @@ class CameraInterface:
     def update_lights(self, lights):
         self.lights = lights
 
-    def render(self, meshes, cameras=None, lights=None, vis=False, mask=True):
+    def render(self, meshes, cameras=None, lights=None, vis=False):
         if cameras is None:
             cameras = self.cameras
         if lights is None:
             lights = self.lights
         assert len(meshes) == len(cameras), "Input sizes mismatch."
         results = {}
-        for mode, renderer in zip(self.modes, self.renderers):
+        for mode, renderer in zip(self.mode, self.renderers):
             results[mode] = renderer(meshes, cameras=cameras, lights=lights)
             if mode == "depth":
                 results[mode] = results[mode].zbuf[:, :, :, :1]
-                results[mode] = (results[mode] * 1000).short()  # m -> mm unit
-            if mask:
-                print("Before", results[mode].min())
-                results[mode] = torch.nn.ReLU()(results[mode])
-                print("After", results[mode].min())
             if vis:
-                print(f"==> {mode}")
                 for nc in range(math.ceil(math.sqrt(self.num_cameras)), 0, -1):
                     nr = int(self.num_cameras / nc)
                     if (nc * nr) == self.num_cameras:
                         break
                 plot_image_grid(
-                    results[mode].cpu().numpy(),
+                    results[mode].detach().cpu().numpy(),
                     rows=nr,
                     cols=nc,
                     mode=mode,
@@ -252,6 +238,10 @@ def init_lighting(mode, device, **kwargs):
 
 if __name__ == "__main__":
 
+    base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
+    cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
+    rand_obj_files = glob.glob(f"{base_dir}/perturb*.obj")
+
     obj_fn = np.random.choice(rand_obj_files, size=1, replace=False)
     mesh = load_objs_as_meshes(obj_fn, device=device)
 
@@ -266,7 +256,7 @@ if __name__ == "__main__":
     )
 
     meshes = mesh.extend(num_views)
-    outcome = camera.render(meshes, vis=True, mask=True)
+    outcome = camera.render(meshes, vis=True)
     import ipdb
 
     ipdb.set_trace()
