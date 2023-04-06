@@ -17,7 +17,7 @@ if __name__ == "__main__":
         device = torch.device("cpu")
 
     n_epoch = 100
-    batch_size = 12
+    batch_size = 9
 
     # create data loader
     data_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data"
@@ -25,9 +25,13 @@ if __name__ == "__main__":
     cano_verts, _, _, cano_mesh = load_wavefront_file(cano_obj_fn, device)
     adjacency_mtx = get_adjacency_matrix(cano_mesh)
     train_ds = DeformDataset(data_dir=data_dir, mode="test")
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    train_dl = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, drop_last=True
+    )
     eval_ds = DeformDataset(data_dir=data_dir, mode="eval")
-    eval_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    eval_dl = DataLoader(
+        eval_ds, batch_size=batch_size, shuffle=True, drop_last=True
+    )
 
     # create differentiable rendering system
     image_size = 256
@@ -54,11 +58,13 @@ if __name__ == "__main__":
         mode="min",
         patience=5,
     )
-    w_rgb = 3.0
-    w_depth = 0.1
-    w_normals = 3.0
-    w_laplacian = 0.01
+    w_rgb = 0.0
+    w_depth = 0  # 0.1
+    w_normals = 0.0
+    w_laplacian = 0  # 0
+    w_offset = 1  # 0
 
+    vis = False
     n_print = 100
     for epoch_idx in range(n_epoch):
 
@@ -90,6 +96,9 @@ if __name__ == "__main__":
             rgb_loss = torch.mean(torch.abs(rgb - pred_rgb) * mask)
             depth_loss = torch.mean(torch.abs(depth - pred_depth) * mask)
             normals_loss = torch.mean(torch.abs(normals - pred_normals) * mask)
+            offset_loss = torch.mean(
+                ((offsets - pred_offsets) ** 2).sum(-1).sqrt()
+            )
             neighbour_offsets = torch.matmul(
                 adjacency_mtx.float(), pred_offsets
             )
@@ -102,6 +111,7 @@ if __name__ == "__main__":
                 w_rgb * rgb_loss
                 + w_depth * depth_loss
                 + w_normals * normals_loss
+                + w_offset * offset_loss
                 + w_laplacian * laplacian_loss
             )
             total_loss += loss.item() * offsets.shape[0]
@@ -116,7 +126,9 @@ if __name__ == "__main__":
                 print("      (rgb_loss):", rgb_loss.item())
                 print("      (depth_loss):", depth_loss.item())
                 print("      (normals_loss):", normals_loss.item())
+                print("      (offset_loss):", offset_loss.item())
                 print("      (laplacian_loss):", laplacian_loss.item())
+        print("Train_loss:", total_loss / n_data)
 
         n_data = 0
         total_loss = 0
@@ -133,10 +145,21 @@ if __name__ == "__main__":
 
                 # differentiable rendering the predicted mesh
                 dfm_mesh = cano_mesh.offset_verts(pred_offsets.reshape(-1, 3))
-                if idx == 1:
-                    tgt_render = camera.render(dfm_mesh, vis=True)
+                if idx == 0:
+                    tgt_render = camera.render(
+                        dfm_mesh,
+                        vis=vis,
+                        save_prefix=f"vis/eval_pred_e{epoch_idx}",
+                    )
+                    gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
+                    gt_render = camera.render(
+                        gt_mesh,
+                        vis=vis,
+                        save_prefix=f"vis/eval_gt_e{epoch_idx}",
+                    )
+                    del gt_mesh
                 else:
-                    tgt_render = camera.render(dfm_mesh, vis=False)
+                    tgt_render = camera.render(dfm_mesh)
                 pred_rgb = tgt_render["rgb"][..., :3].permute([0, 3, 1, 2])
                 pred_depth = (
                     tgt_render["depth"]
@@ -151,7 +174,12 @@ if __name__ == "__main__":
                 normals_loss = torch.mean(
                     torch.abs(normals - pred_normals) * mask
                 )
-                neighbour_offsets = torch.matmul(adjacency_mtx, pred_offsets)
+                offset_loss = torch.mean(
+                    ((offsets - pred_offsets) ** 2).sum(-1).sqrt()
+                )
+                neighbour_offsets = torch.matmul(
+                    adjacency_mtx.float(), pred_offsets
+                )
                 laplacian_loss = torch.mean(
                     (neighbour_offsets - pred_offsets) ** 2
                     * pred_offsets.shape[1]
@@ -161,6 +189,7 @@ if __name__ == "__main__":
                     w_rgb * rgb_loss
                     + w_depth * depth_loss
                     + w_normals * normals_loss
+                    + w_offset * offset_loss
                     + w_laplacian * laplacian_loss
                 )
                 total_loss += loss.item() * offsets.shape[0]
@@ -173,4 +202,6 @@ if __name__ == "__main__":
                 print("      (rgb_loss):", rgb_loss.item())
                 print("      (depth_loss):", depth_loss.item())
                 print("      (normals_loss):", normals_loss.item())
+                print("      (offset_loss):", offset_loss.item())
                 print("      (laplacian_loss):", laplacian_loss.item())
+        print("Eval_loss:", total_loss / n_data)
