@@ -4,6 +4,7 @@ import pickle as pkl
 import random
 import sys
 
+import numpy as np
 import torch
 from pytorch3d.io import load_obj, load_objs_as_meshes
 from pytorch3d.renderer import TexturesUV
@@ -29,6 +30,14 @@ def load_wavefront_file(obj_fn, device, offset=[0.0, 0.0, 0.0], scale=1):
         tex = None
     mesh = Meshes(verts=[verts], faces=[face_idxs], textures=tex)
     return verts, face_idxs, tex, mesh
+
+
+def get_adjacency_matrix(mesh):
+    edges = mesh.detach().edges_packed().cpu()
+    adjacency_matrix = torch.zeros((edges.max() + 1, edges.max() + 1)).bool()
+    adjacency_matrix[edges[:, 0], edges[:, 1]] = 1
+    adjacency_matrix = adjacency_matrix.to(mesh.device)
+    return adjacency_matrix
 
 
 def partition_data(in_dir, seed):
