@@ -1,2 +1,3 @@
-data/perturbed_cloth*
+__pycache__
+data/**
 data/usd
