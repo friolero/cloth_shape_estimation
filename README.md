@@ -51,7 +51,14 @@
 
 
 #### 2. Data driven deformation estimation with deform-net 
-`python3 deform_net_predict.py PATH_TO_OBJ`
+Create rendered image from perturbed cloth obj files and partition data into training, evaluation and testing set. This may takes 1-2 hours.
+`python3 data_utils.py`
+
+Start deform_net training with:
+`python3 deform_net_train.py`
+
+Perform inference with trained deform_net :
+`python3 deform_net_predict.py -m model.ckpt -obj PATH_TO_OBJ`
 
 
 #### 3. Cloth deformation optimization via differentiable rendering

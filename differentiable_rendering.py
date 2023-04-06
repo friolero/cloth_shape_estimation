@@ -8,15 +8,21 @@ import torch
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.ops import interpolate_face_attributes
 from pytorch3d.renderer.blending import BlendParams
-from pytorch3d.renderer.cameras import (FoVPerspectiveCameras,
-                                        look_at_view_transform)
-from pytorch3d.renderer.lighting import (AmbientLights, DirectionalLights,
-                                         PointLights)
-from pytorch3d.renderer.mesh.rasterizer import (MeshRasterizer,
-                                                RasterizationSettings)
+from pytorch3d.renderer.cameras import (
+    FoVPerspectiveCameras,
+    look_at_view_transform,
+)
+from pytorch3d.renderer.lighting import (
+    AmbientLights,
+    DirectionalLights,
+    PointLights,
+)
+from pytorch3d.renderer.mesh.rasterizer import (
+    MeshRasterizer,
+    RasterizationSettings,
+)
 from pytorch3d.renderer.mesh.renderer import MeshRenderer
-from pytorch3d.renderer.mesh.shader import (SoftPhongShader,
-                                            SoftSilhouetteShader)
+from pytorch3d.renderer.mesh.shader import SoftPhongShader, SoftSilhouetteShader
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -32,6 +38,7 @@ def plot_image_grid(
     fill: bool = True,
     show_axes: bool = False,
     mode: str = "rgb",
+    save_prefix: str = None,
     display: bool = False,
 ):
     """
@@ -68,9 +75,13 @@ def plot_image_grid(
     )
 
     for ax, im in zip(axarr.ravel(), images):
-        if mode in ["rgb", "normals"]:
+        if mode == "rgb":
             # only render RGB channels
             ax.imshow(im[..., :3])
+        elif mode == "normals":
+            vis_im = (im[..., :3] + 1.0) / 2
+            vis_im = vis_im[..., [0, 2, 1]]
+            ax.imshow(vis_im)
         elif mode == "depth":
             norm_im = im - im[..., 0].min() / (
                 im[..., 0].max() - im[..., 0].min()
@@ -82,6 +93,8 @@ def plot_image_grid(
             ax.imshow(im[..., 3])
         if not show_axes:
             ax.set_axis_off()
+    if save_prefix is not None:
+        plt.savefig(f"{save_prefix}_{mode}.png")
     if display:
         ax.set_title(mode)
         plt.show()
@@ -213,7 +226,9 @@ class CameraInterface:
     def update_lights(self, lights):
         self.lights = lights
 
-    def render(self, meshes, cameras=None, lights=None, vis=False):
+    def render(
+        self, meshes, cameras=None, lights=None, vis=False, save_prefix=None
+    ):
         if cameras is None:
             cameras = self.cameras
         if lights is None:
@@ -226,7 +241,7 @@ class CameraInterface:
                 results[mode] = results[mode].zbuf[:, :, :, :1]
             if mode == "normals":
                 results["normals"] = self.fetch_normals(meshes, results[mode])
-            if vis:
+            if vis or (save_prefix is not None):
                 for nc in range(math.ceil(math.sqrt(self.num_cameras)), 0, -1):
                     nr = int(self.num_cameras / nc)
                     if (nc * nr) == self.num_cameras:
@@ -236,7 +251,8 @@ class CameraInterface:
                     rows=nr,
                     cols=nc,
                     mode=mode,
-                    display=True,
+                    display=vis,
+                    save_prefix=save_prefix,
                 )
         return results
 

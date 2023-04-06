@@ -128,6 +128,8 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
+    import sys
+
     from differentiable_rendering import CameraInterface, init_lighting
 
     image_size = 256
@@ -151,12 +153,13 @@ if __name__ == "__main__":
     min_offset = 0  # -0.5
     n_image_per_obj = 5
 
-    base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
+    # base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
+    base_dir = sys.argv[1]
     cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
     for mode in ["eval", "test", "train"]:
         if not os.path.isdir(f"{base_dir}/{mode}"):
             print(f"==> Partition obj data in {base_dir} into train/eval/test")
-            partition_data(77, base_dir)
+            partition_data(base_dir, seed=77)
         print(f"==> {mode}")
         obj_files = glob.glob(f"{base_dir}/{mode}/*.obj")
         mesh2image(
