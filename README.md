@@ -42,16 +42,19 @@
 
 ## Usage
 
-#### (1) Generate perturbed cloth data
-`python3 launch_cloth_randomization.py 0/1`
+#### 1. Generate perturbed cloth data as .obj files
+`python3 cloth_randomization.py -mode 1 -output_dir cloth_project -n_output 5000 -seed SEED -n_openmp_thread N_PARALLEL_THREAD`
+
+> Wavefront Data will be saved under $DIFFCLOTH_PATH/output/$args.output_dir.
 > * Mode 0 for randomized perturbation trajectory; 
 > * Mode 1 uses Bezier curve to generate the perturbation path from a randomly identified control vertex to another vertex position within a specified distance range.
 
 
-#### (2) Data driven deformation estimation with deform-net 
+#### 2. Data driven deformation estimation with deform-net 
 `python3 deform_net_predict.py PATH_TO_OBJ`
 
-#### (3) Cloth deformation optimization via differentiable rendering
+
+#### 3. Cloth deformation optimization via differentiable rendering
 `python3 cloth_deform_estimation.py`
 
 > * Step (2) is optional to run step (3)

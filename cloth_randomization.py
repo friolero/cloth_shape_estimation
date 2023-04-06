@@ -9,7 +9,6 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-import common
 from pySim.pySim import pySim
 
 parser = argparse.ArgumentParser("Perturb flat cloth")
@@ -24,10 +23,18 @@ parser.add_argument("-s", dest="save", action="store_true", default=True)
 parser.add_argument("-task_name", type=str, default="flatten_tshirt")
 parser.add_argument("-n_vertices", type=int, default=600)
 parser.add_argument("-n_openmp_thread", type=int, default=16)
-parser.add_argument("-i", type=int, required=True)
+parser.add_argument("-n_output", type=int, required=True)
 parser.add_argument("-output_dir", type=str, default="cloth_project/")
 parser.add_argument("-seed", type=int, default=8824325)
 args = parser.parse_args()
+
+
+def toTorchTensor(x, requriesGrad=False, toDouble=False):
+    torchX = torch.Tensor(x)
+    if toDouble:
+        torchX = torchX.double()
+    torchX = torchX.view(-1).clone().detach().requires_grad_(requriesGrad)
+    return torchX
 
 
 class Bezier:
@@ -91,9 +98,9 @@ def get_state(sim: diffcloth.Simulation, to_tensor: bool = False) -> tuple:
     x, v = state_info_init.x, state_info_init.v
     clip_pos = np.array(sim.getStateInfo().x_fixedpoints)
     if to_tensor:
-        x_t = common.toTorchTensor(x, False, False).clone()
-        v_t = common.toTorchTensor(v, False, False).clone()
-        a_t = common.toTorchTensor(clip_pos, False, False).clone()
+        x_t = toTorchTensor(x, False, False).clone()
+        v_t = toTorchTensor(v, False, False).clone()
+        a_t = toTorchTensor(clip_pos, False, False).clone()
         return x_t, v_t, a_t
     else:
         return x, v, clip_pos
@@ -178,7 +185,7 @@ def forward_sim_targeted_control(
     records = []
     for points in tqdm(curve_points):
         records.append((x_i, v_i))
-        a_t = common.toTorchTensor(points, False, False).clone()
+        a_t = toTorchTensor(points, False, False).clone()
         for _ in range(action_repeat):
             x_i, v_i = pysim(x_i, v_i, a_t)
     records.append((x_i, v_i))
@@ -308,6 +315,7 @@ def perturb(args, out_fn):
             obj_fn,
             export_step=sim.getStateInfo().stepIdx,
             renormalize=True,
+            dir_prefix=f"output/{args.output_dir}",
         )
     del sim, pysim
 
@@ -318,16 +326,17 @@ if __name__ == "__main__":
 
     diffcloth.enableOpenMP(n_threads=args.n_openmp_thread)
 
-    args.seed += args.i
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    for i in range(args.n_output):
+        args.seed += i
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
 
-    obj_fn = f"perturbed_cloth_{args.mode}_{args.i}.obj"
-    if os.path.isfile(f"output/cloth_project/{obj_fn}"):
-        print(f"output/cloth_project/{obj_fn} exists. Skip...")
-    else:
-        try:
-            with stdout_redirected():
-                perturb(args, obj_fn)
-        except:
-            print("Error encountered. Retry....")
+        obj_fn = f"perturbed_cloth_{args.mode}_{i}.obj"
+        if os.path.isfile(f"output/{args.output_dir}/{obj_fn}"):
+            print(f"output/{args.output_dir}/{obj_fn} exists. Skip...")
+        else:
+            try:
+                with stdout_redirected():
+                    perturb(args, obj_fn)
+            except:
+                print("Error encountered. Retry....")
