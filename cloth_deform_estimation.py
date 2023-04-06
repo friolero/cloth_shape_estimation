@@ -1,11 +1,8 @@
 import glob
 
-import ipdb
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from mpl_toolkits.mplot3d.axes3d import Axes3D
-from pytorch3d.io import load_obj, load_objs_as_meshes
 from pytorch3d.loss import (
     chamfer_distance,
     mesh_edge_loss,
@@ -13,17 +10,10 @@ from pytorch3d.loss import (
     mesh_normal_consistency,
 )
 from pytorch3d.ops import sample_points_from_meshes
-from pytorch3d.renderer import TexturesUV
-from pytorch3d.structures import Meshes
 from tqdm import tqdm
 
+from data_utils import load_wavefront_file
 from differentiable_rendering import CameraInterface, init_lighting
-
-if torch.cuda.is_available():
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
-else:
-    device = torch.device("cpu")
 
 
 def plot_pointcloud(mesh, title=""):
@@ -31,7 +21,6 @@ def plot_pointcloud(mesh, title=""):
     points = sample_points_from_meshes(mesh, 5000)
     x, y, z = points.clone().detach().cpu().squeeze().unbind(1)
     fig = plt.figure(figsize=(5, 5))
-    # ax = Axes3D(fig)
     ax = fig.add_subplot(projection="3d")
     ax.scatter(x, z, -y)
     ax.set_xlabel("x")
@@ -43,29 +32,17 @@ def plot_pointcloud(mesh, title=""):
     plt.show()
 
 
-def load_wavefront_file(obj_fn, device, offset=[0.0, 0.0, 0.0], scale=1):
-    verts, faces, aux = load_obj(obj_fn, device=device)
-    verts = verts.to(device)
-    verts = (verts * scale) + torch.Tensor(offset).to(device)
-    face_idxs = faces.verts_idx.to(device)
-    tex_map = aux.texture_images
-    if tex_map is not None and len(tex_map) > 0:
-        verts_uvs = aux.verts_uvs.to(device)  # V, 2
-        faces_uvs = faces.textures_idx.to(device)  # V, 2
-        image = list(tex_map.values())[0].to(device)[None]
-        tex = TexturesUV(
-            verts_uvs=[verts_uvs], faces_uvs=[faces_uvs], maps=image
-        )
-    else:
-        tex = None
-    mesh = Meshes(verts=[verts], faces=[face_idxs], textures=tex)
-    return verts, face_idxs, tex, mesh
-
-
 if __name__ == "__main__":
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cpu")
+
     base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
     cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
-    rand_obj_files = glob.glob(f"{base_dir}/perturb*.obj")
+    rand_obj_files = glob.glob(f"{base_dir}/*/perturb*.obj")
     # tgt_obj_fn = np.random.choice(rand_obj_files)
     tgt_obj_fn = rand_obj_files[232]
 
@@ -81,7 +58,7 @@ if __name__ == "__main__":
 
     image_size = 256
     cam_dist = 8.0
-    elevation = [45.0]
+    elevation = [30.0]
     azimuth = [45.0]
     lights = init_lighting(mode="point", device=device)
     camera = CameraInterface(

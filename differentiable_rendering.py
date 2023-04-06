@@ -8,21 +8,15 @@ import torch
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.ops import interpolate_face_attributes
 from pytorch3d.renderer.blending import BlendParams
-from pytorch3d.renderer.cameras import (
-    FoVPerspectiveCameras,
-    look_at_view_transform,
-)
-from pytorch3d.renderer.lighting import (
-    AmbientLights,
-    DirectionalLights,
-    PointLights,
-)
-from pytorch3d.renderer.mesh.rasterizer import (
-    MeshRasterizer,
-    RasterizationSettings,
-)
+from pytorch3d.renderer.cameras import (FoVPerspectiveCameras,
+                                        look_at_view_transform)
+from pytorch3d.renderer.lighting import (AmbientLights, DirectionalLights,
+                                         PointLights)
+from pytorch3d.renderer.mesh.rasterizer import (MeshRasterizer,
+                                                RasterizationSettings)
 from pytorch3d.renderer.mesh.renderer import MeshRenderer
-from pytorch3d.renderer.mesh.shader import SoftPhongShader, SoftSilhouetteShader
+from pytorch3d.renderer.mesh.shader import (SoftPhongShader,
+                                            SoftSilhouetteShader)
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -266,7 +260,7 @@ if __name__ == "__main__":
 
     base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
     cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
-    rand_obj_files = glob.glob(f"{base_dir}/perturb*.obj")
+    rand_obj_files = glob.glob(f"{base_dir}/*/perturb*.obj")
 
     obj_fn = np.random.choice(rand_obj_files, size=1, replace=False)
     mesh = load_objs_as_meshes(obj_fn, device=device)
