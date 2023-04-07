@@ -40,6 +40,23 @@ def get_adjacency_matrix(mesh):
     return adjacency_matrix
 
 
+def get_riemannian_metric(vertices, faces):
+    n_faces = faces.shape[0]
+    alpha = torch.zeros((n_faces, 3, 2)).to(
+        dtype=faces.dtype, device=faces.device
+    )
+    V0, V1, V2 = (
+        vertices.index_select(0, faces[:, 0]),
+        vertices.index_select(0, faces[:, 1]),
+        vertices.index_select(0, faces[:, 2]),
+    )
+    alpha[:, :, 0] = V1 - V0
+    alpha[:, :, 1] = V2 - V0
+    riemannian_metric = torch.matmul(alpha.transpose(1, 2), alpha)
+
+    return riemannian_metric
+
+
 def partition_data(in_dir, seed):
     random.seed(seed)
 
