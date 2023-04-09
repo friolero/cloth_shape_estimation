@@ -207,8 +207,8 @@ class DeformNet(nn.Module):
     def __init__(
         self,
         tplt_vtx,
-        use_depth=True,
-        use_normals=True,
+        use_depth=False,
+        use_normals=False,
         c_dim=256,
         predict_rgb=False,
     ):
@@ -255,7 +255,7 @@ class DeformNet(nn.Module):
         # residual_coef = torch.zeros(1)
         # self.residual_coef = nn.Parameter(residual_coef)
 
-    def forward(self, scale, rgb_images, depth_images, normals_images):
+    def forward(self, rgb_images, depth_images, normals_images):
 
         # encode inputs
         c_bxc = self.rgb_encoder(rgb_images)
@@ -270,7 +270,7 @@ class DeformNet(nn.Module):
         pred = self.decoder(self.tplt_vtx, c=c_bxc)
         delta_vtx = pred[:, :, :3]  # offset
         # p = scale.unsqueeze(1) * self.tplt_vtx + self.residual_coef * delta_vtx
-        p = scale.unsqueeze(1) * self.tplt_vtx + delta_vtx
+        p = self.tplt_vtx + delta_vtx
 
         # optional color prediction
         if self.predict_rgb:

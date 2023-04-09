@@ -32,12 +32,48 @@ def load_wavefront_file(obj_fn, device, offset=[0.0, 0.0, 0.0], scale=1):
     return verts, face_idxs, tex, mesh
 
 
+def get_angle_diff(normals, pred_normals):
+    inner_prod = (normals * pred_normals).sum(dim=-1, keepdim=True)
+    gt_norm = normals.pow(2).sum(dim=-1, keepdim=True).pow(0.5)
+    pred_norm = pred_normals.pow(2).sum(dim=-1, keepdim=True).pow(0.5)
+    cos_angles = inner_prod / (gt_norm * pred_norm)
+    angle_diff = torch.acos(cos_angles)
+    return angle_diff
+
+
 def get_adjacency_matrix(mesh):
     edges = mesh.detach().edges_packed().cpu()
     adjacency_matrix = torch.zeros((edges.max() + 1, edges.max() + 1)).bool()
     adjacency_matrix[edges[:, 0], edges[:, 1]] = 1
     adjacency_matrix = adjacency_matrix.to(mesh.device)
     return adjacency_matrix
+
+
+def compute_vertex_normals(meshes):
+    faces_packed = meshes.faces_packed()
+    verts_packed = meshes.verts_packed()
+    verts_normals = torch.zeros_like(verts_packed)
+    vertices_faces = verts_packed[faces_packed]
+
+    faces_normals = torch.cross(
+        vertices_faces[:, 2] - vertices_faces[:, 1],
+        vertices_faces[:, 0] - vertices_faces[:, 1],
+        dim=1,
+    )
+
+    verts_normals.index_add_(0, faces_packed[:, 0], faces_normals)
+    verts_normals.index_add_(0, faces_packed[:, 1], faces_normals)
+    verts_normals.index_add_(0, faces_packed[:, 2], faces_normals)
+
+    return torch.nn.functional.normalize(verts_normals, eps=1e-6, dim=1)
+
+
+def batch_scale_mesh(cano_verts, cano_faces, tex, batch_scale):
+    batch_size = batch_scale.shape[0]
+    batch_verts = [cano_verts * scale[0] for scale in batch_scale]
+    batch_faces = [cano_faces] * batch_size
+    batch_tex = tex.extend(batch_size)
+    return Meshes(verts=batch_verts, faces=batch_faces, textures=batch_tex)
 
 
 def get_riemannian_metric(vertices, faces):
@@ -145,8 +181,6 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    import sys
-
     from differentiable_rendering import CameraInterface, init_lighting
 
     image_size = 256
@@ -164,14 +198,9 @@ if __name__ == "__main__":
         mode=["rgb", "depth", "normals"],
     )
 
-    max_scale = 1.3
-    min_scale = 0.8
-    max_offset = 0  # 0.5
-    min_offset = 0  # -0.5
-    n_image_per_obj = 5
-
-    # base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
-    base_dir = sys.argv[1]
+    # import sys
+    # base_dir = sys.argv[1]
+    base_dir = "/home/zyuwei/Projects/cloth_shape_estimation/data/"
     cano_obj_fn = f"{base_dir}/textured_flat_cloth.obj"
     for mode in ["eval", "test", "train"]:
         if not os.path.isdir(f"{base_dir}/{mode}"):
@@ -184,9 +213,4 @@ if __name__ == "__main__":
             camera,
             obj_files,
             cano_obj_fn,
-            max_scale=max_scale,
-            min_scale=min_scale,
-            max_offset=max_offset,
-            min_offset=min_offset,
-            n_image_per_obj=n_image_per_obj,
         )

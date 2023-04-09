@@ -34,13 +34,12 @@ class DeformDataset(Dataset):
     def __getitem__(self, idx):
         with open(self.pkl_files[idx], "rb") as fp:
             data = pkl.load(fp)
-            scale = torch.FloatTensor([data["scale"]])
             offsets = data["offsets"]
             depths = data["depth"].permute([2, 0, 1]).repeat([3, 1, 1])
         rgb = self.img2tensor(self.rgb_files[idx])
         normals = self.img2tensor(self.normals_files[idx])
         normals = normals * 2.0 - 1.0
-        return rgb, depths, normals, scale, offsets
+        return rgb, depths, normals, offsets
 
 
 if __name__ == "__main__":
@@ -60,9 +59,9 @@ if __name__ == "__main__":
 
     for idx, batch in enumerate(train_dl):
         batch = [data.to(device) for data in batch]
-        rgb, depths, normals, scale, offsets = batch
+        rgb, depths, normals, offsets = batch
         print(
-            rgb.shape, depths.shape, normals.shape, scale.shape, offsets.shape
+            rgb.shape, depths.shape, normals.shape, offsets.shape
         )
         if idx >= 10:
             break
