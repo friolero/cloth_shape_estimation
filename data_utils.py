@@ -33,9 +33,9 @@ def load_wavefront_file(obj_fn, device, offset=[0.0, 0.0, 0.0], scale=1):
 
 
 def get_angle_diff(normals, pred_normals):
-    inner_prod = (normals * pred_normals).sum(dim=-1, keepdim=True)
-    gt_norm = normals.pow(2).sum(dim=-1, keepdim=True).pow(0.5)
-    pred_norm = pred_normals.pow(2).sum(dim=-1, keepdim=True).pow(0.5)
+    inner_prod = (normals * pred_normals).sum(dim=1, keepdim=True)
+    gt_norm = normals.pow(2).sum(dim=1, keepdim=True).pow(0.5)
+    pred_norm = pred_normals.pow(2).sum(dim=1, keepdim=True).pow(0.5)
     cos_angles = inner_prod / (gt_norm * pred_norm)
     angle_diff = torch.acos(cos_angles)
     return angle_diff
@@ -45,6 +45,7 @@ def get_adjacency_matrix(mesh):
     edges = mesh.detach().edges_packed().cpu()
     adjacency_matrix = torch.zeros((edges.max() + 1, edges.max() + 1)).bool()
     adjacency_matrix[edges[:, 0], edges[:, 1]] = 1
+    adjacency_matrix[edges[:, 1], edges[:, 0]] = 1
     adjacency_matrix = adjacency_matrix.to(mesh.device)
     return adjacency_matrix
 
@@ -74,6 +75,61 @@ def batch_scale_mesh(cano_verts, cano_faces, tex, batch_scale):
     batch_faces = [cano_faces] * batch_size
     batch_tex = tex.extend(batch_size)
     return Meshes(verts=batch_verts, faces=batch_faces, textures=batch_tex)
+
+
+def get_vertex_covariance(meshes, adjacency_matrix, packed=True):
+    n_verts = adjacency_matrix.shape[0]
+    verts = meshes.verts_packed().reshape(-1, n_verts, 3)  # B, N, 1
+    mask = torch.ones_like(verts[..., :1])  # B, N, 1
+    batch_adj_matrix = adjacency_matrix.unsqueeze(0).float()  # 1, N, N
+    nb_sum = torch.matmul(batch_adj_matrix, verts)  # B, N, 3
+    count = torch.matmul(batch_adj_matrix, mask)  # B, N, 1
+    nb_mean = nb_sum / count  # B, N, 3
+    edges = meshes.edges_packed()  # BxE, 3
+    e0 = torch.cat([edges[:, 0], edges[:, 1]], dim=0)
+    e1 = torch.cat([edges[:, 1], edges[:, 0]], dim=0)
+    nb_verts = verts.reshape(-1, 3)[e1]
+    diff = nb_verts - nb_mean.reshape(-1, 3)[e0]
+    diff = diff.unsqueeze(-1)  # B*E, 3
+    cov = torch.matmul(diff, diff.transpose(1, 2))  # B*E, 3, 3
+    verts_cov = torch.sparse_coo_tensor(
+        e0.unsqueeze(0),
+        cov,
+        size=(verts.shape[0] * verts.shape[1], 3, 3),
+    ).coalesce()
+    verts_cov = verts_cov.to_dense()  # B*N, 3, 3
+    verts_cov /= count.reshape(-1, 1, 1)  # taking average over neighbours
+    if packed:
+        return verts_cov  # B*N, 3, 3
+    else:
+        return verts_cov.reshape(verts.shape[0], verts.shape[1], 3, 3)
+
+
+def rayleigh_quotient_curvature(meshes, adjacency_matrix):
+    """RQ Curvature according to Garnet++
+        https://arxiv.org/pdf/2007.10867v1.pdf.
+
+    rq_curvature = g_T * cov * g / g_T * g
+
+    Arguments:
+        verts: vertex input (batch * N, 3)
+        verts_cov: vertex covariance(batch * N, 3, 3)
+    """
+    verts = meshes.verts_packed()
+    verts_cov = get_vertex_covariance(meshes, adjacency_matrix, packed=True)
+
+    rq_curv = torch.matmul(
+        torch.matmul(verts.unsqueeze(1), verts_cov), verts.unsqueeze(-1)
+    ) / torch.matmul(verts.unsqueeze(1), verts.unsqueeze(-1))
+    rq_curv = rq_curv.reshape(-1, adjacency_matrix.shape[0])
+
+    nb_rq_curv = (
+        rq_curv.unsqueeze(-1).repeat([1, 1, adjacency_matrix.shape[-1]])
+        * adjacency_matrix
+    )
+    min_rq_curv, _ = nb_rq_curv.min(-1)
+    max_rq_curv, _ = nb_rq_curv.max(-1)
+    return min_rq_curv, max_rq_curv
 
 
 def get_riemannian_metric(vertices, faces):

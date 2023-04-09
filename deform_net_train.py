@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from data_utils import (compute_vertex_normals, get_adjacency_matrix,
-                        get_angle_diff, load_wavefront_file)
+                        load_wavefront_file, rayleigh_quotient_curvature)
 from deform_dataset import DeformDataset
 from deform_net import DeformNet
 from differentiable_rendering import CameraInterface, init_lighting
@@ -83,8 +83,9 @@ if __name__ == "__main__":
     w_depth = 0.0
     w_normals = 0.0
     w_laplacian = 0.0  # 0
-    w_offset = 0  # 0
-    w_mesh_normal = 1  # 0
+    w_offset = 1  # 0
+    w_mesh_normal = 0.3  # 0
+    w_mesh_curv = 1000  # 0
     writer.add_hparams(
         {
             "lr": lr,
@@ -96,6 +97,7 @@ if __name__ == "__main__":
             "w_offset": w_offset,
             "w_laplacian": w_laplacian,
             "w_meshnormal": w_mesh_normal,
+            "w_meshcurvature": w_mesh_curv,
         },
         dict(),
     )
@@ -115,6 +117,7 @@ if __name__ == "__main__":
             "offset": 0,
             "laplacian": 0,
             "mesh_normal": 0,
+            "mesh_curvature": 0,
         }
         for idx, batch in enumerate(tqdm(train_dl)):
 
@@ -209,6 +212,15 @@ if __name__ == "__main__":
                         pred_verts_normal, verts_normal, dim=-1
                 )).pow(2)
                 )
+            pred_min_rq_curv, pred_max_rq_curv = rayleigh_quotient_curvature(
+                dfm_mesh, adjacency_mtx)
+            gt_min_rq_curv, gt_max_rq_curv = rayleigh_quotient_curvature(
+                gt_mesh, adjacency_mtx)
+            mesh_curv_loss = torch.mean(
+                (gt_min_rq_curv - pred_min_rq_curv).pow(2)
+                +
+                (gt_max_rq_curv - pred_max_rq_curv).pow(2))
+
             loss = (
                 w_rgb * rgb_loss
                 + w_depth * depth_loss
@@ -216,6 +228,7 @@ if __name__ == "__main__":
                 + w_offset * offset_loss
                 + w_laplacian * laplacian_loss
                 + w_mesh_normal * mesh_normal_loss
+                + w_mesh_curv * mesh_curv_loss
             )
             # backwarding loss
             loss.backward()
@@ -229,6 +242,7 @@ if __name__ == "__main__":
             total_loss["offset"] += offset_loss.item() * n_batch_data
             total_loss["laplacian"] += laplacian_loss.item() * n_batch_data
             total_loss["mesh_normal"] += mesh_normal_loss.item() * n_batch_data
+            total_loss["mesh_curvature"] += mesh_normal_loss.item() * n_batch_data
             n_data += n_batch_data
 
             if idx % n_log == 0:
@@ -246,6 +260,9 @@ if __name__ == "__main__":
                 writer.add_scalar(
                     "train/mesh_normal_loss", mesh_normal_loss.item(), step
                 )
+                writer.add_scalar(
+                    "train/mesh_curvature_loss", mesh_curv_loss.item(), step
+                )
         for k, v in total_loss.items():
             writer.add_scalar(f"loss/{k}/train", v / n_data, epoch_idx)
 
@@ -258,6 +275,7 @@ if __name__ == "__main__":
             "offset": 0,
             "laplacian": 0,
             "mesh_normal": 0,
+            "mesh_curvature": 0,
         }
         for idx, batch in enumerate(tqdm(eval_dl)):
             # if idx >= 10:
@@ -368,6 +386,15 @@ if __name__ == "__main__":
                     (1 - F.cosine_similarity(
                             pred_verts_normal, verts_normal, dim=-1
                         )).pow(2))
+
+                pred_min_rq_curv, pred_max_rq_curv = rayleigh_quotient_curvature(
+                    dfm_mesh, adjacency_mtx)
+                gt_min_rq_curv, gt_max_rq_curv = rayleigh_quotient_curvature(
+                    gt_mesh, adjacency_mtx)
+                mesh_curv_loss = torch.mean(
+                    (gt_min_rq_curv - pred_min_rq_curv).pow(2)
+                    +
+                    (gt_max_rq_curv - pred_max_rq_curv).pow(2))
                 loss = (
                     w_rgb * rgb_loss
                     + w_depth * depth_loss
@@ -375,6 +402,7 @@ if __name__ == "__main__":
                     + w_offset * offset_loss
                     + w_laplacian * laplacian_loss
                     + w_mesh_normal * mesh_normal_loss
+                    + w_mesh_curv * mesh_curv_loss
                 )
                 scheduler.step(loss)
                 n_batch_data = offsets.shape[0]
@@ -387,6 +415,7 @@ if __name__ == "__main__":
                 total_loss["mesh_normal"] += (
                     mesh_normal_loss.item() * n_batch_data
                 )
+                total_loss["mesh_curvature"] += mesh_normal_loss.item() * n_batch_data
                 n_data += n_batch_data
 
         eval_loss = total_loss["weighted"] / n_data
