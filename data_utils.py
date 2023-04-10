@@ -54,11 +54,11 @@ def compute_vertex_normals(meshes):
     faces_packed = meshes.faces_packed()
     verts_packed = meshes.verts_packed()
     verts_normals = torch.zeros_like(verts_packed)
-    vertices_faces = verts_packed[faces_packed]
+    verts_faces = verts_packed[faces_packed]
 
     faces_normals = torch.cross(
-        vertices_faces[:, 2] - vertices_faces[:, 1],
-        vertices_faces[:, 0] - vertices_faces[:, 1],
+        verts_faces[:, 2] - verts_faces[:, 1],
+        verts_faces[:, 0] - verts_faces[:, 1],
         dim=1,
     )
 
@@ -132,21 +132,26 @@ def rayleigh_quotient_curvature(meshes, adjacency_matrix):
     return min_rq_curv, max_rq_curv
 
 
-def get_riemannian_metric(vertices, faces):
+def get_riemannian_metric(meshes, packed=True):
+
+    verts = meshes.verts_packed()
+    faces = meshes.faces_packed()
     n_faces = faces.shape[0]
     alpha = torch.zeros((n_faces, 3, 2)).to(
-        dtype=faces.dtype, device=faces.device
+        dtype=verts.dtype, device=verts.device
     )
     V0, V1, V2 = (
-        vertices.index_select(0, faces[:, 0]),
-        vertices.index_select(0, faces[:, 1]),
-        vertices.index_select(0, faces[:, 2]),
+        verts.index_select(0, faces[:, 0]),
+        verts.index_select(0, faces[:, 1]),
+        verts.index_select(0, faces[:, 2]),
     )
-    alpha[:, :, 0] = V1 - V0
-    alpha[:, :, 1] = V2 - V0
-    riemannian_metric = torch.matmul(alpha.transpose(1, 2), alpha)
-
-    return riemannian_metric
+    alpha[..., 0] = V1 - V0
+    alpha[..., 1] = V2 - V0
+    g = torch.matmul(alpha.transpose(1, 2), alpha)
+    if packed:
+        return g
+    else:
+        return g.reshape(len(meshes), -1, 2, 2)
 
 
 def partition_data(in_dir, seed):
