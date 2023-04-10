@@ -25,11 +25,11 @@ class Resnet18(nn.Module):
         use_linear (bool): whether a final linear layer should be used
     """
 
-    def __init__(self, c_dim, normalize=True, use_linear=True):
+    def __init__(self, c_dim, normalize=True, use_linear=True, pretrained=True):
         super(Resnet18, self).__init__()
         self.normalize = normalize
         self.use_linear = use_linear
-        self.features = models.resnet18(pretrained=True)
+        self.features = models.resnet18(pretrained=pretrained)
         self.features.fc = nn.Identity()
         if use_linear:
             self.fc = nn.Linear(512, c_dim)
@@ -216,20 +216,26 @@ class DeformNet(nn.Module):
 
         self.c_dim = c_dim
         self.rgb_encoder = Resnet18(
-            c_dim=self.c_dim, normalize=True, use_linear=True
+            c_dim=self.c_dim, normalize=True, use_linear=True, pretrained=True
         )
         self.decoder_input_dim = self.c_dim
 
         if use_depth:
             self.depth_encoder = Resnet18(
-                c_dim=self.c_dim, normalize=True, use_linear=True
+                c_dim=self.c_dim,
+                normalize=False,
+                use_linear=True,
+                pretrained=False,
             )
             self.decoder_input_dim += self.c_dim
         else:
             self.depth_encoder = None
         if use_normals:
             self.normals_encoder = Resnet18(
-                c_dim=self.c_dim, normalize=True, use_linear=True
+                c_dim=self.c_dim,
+                normalize=False,
+                use_linear=True,
+                pretrained=False,
             )
             self.decoder_input_dim += self.c_dim
         else:

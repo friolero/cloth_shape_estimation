@@ -20,6 +20,7 @@ from data_utils import (
 from deform_dataset import DeformDataset
 from deform_net import DeformNet
 from differentiable_rendering import CameraInterface, init_lighting
+from graph_conv_deform_net import GraphConvDeformNet
 
 if __name__ == "__main__":
 
@@ -79,7 +80,10 @@ if __name__ == "__main__":
     lr = 1e-4
     betas = (0.9, 0.999)
     lr_scheduler_patience = 3
-    model = DeformNet(cano_verts, use_depth=True, use_normals=True).to(device)
+    # model = DeformNet(cano_verts, use_depth=True, use_normals=True).to(device)
+    model = GraphConvDeformNet(
+        cano_verts, adjacency_mtx, use_depth=True, use_normals=True
+    ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -91,10 +95,10 @@ if __name__ == "__main__":
     w_normals = 0.0  # degenerate -> not used
     w_laplacian = 0.0  # opposite optimization goal -> not used
     w_chamfer = 0.0  # 1.0 not helpful -> not used
-    w_offset = 1  # 0
-    w_mesh_normal = 0  # 0.3
-    w_mesh_curv = 0  # 1000
-    w_riemannian_reg = 1000
+    w_offset = 1
+    w_mesh_normal = 0 #0.3
+    w_mesh_curv = 0 #1000
+    w_riemannian_reg = 0 #100
     writer.add_hparams(
         {
             "lr": lr,
