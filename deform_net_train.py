@@ -4,6 +4,8 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from pytorch3d.loss import chamfer_distance
+from pytorch3d.ops import sample_points_from_meshes
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -72,7 +74,7 @@ if __name__ == "__main__":
     lr = 1e-4
     betas = (0.9, 0.999)
     lr_scheduler_patience = 3
-    model = DeformNet(cano_verts, use_depth=True, use_normals=True).to(device)
+    model = DeformNet(cano_verts, use_depth=False, use_normals=False).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -83,6 +85,7 @@ if __name__ == "__main__":
     w_depth = 0.0
     w_normals = 0.0
     w_laplacian = 0.0  # 0
+    w_chamfer = 1.0
     w_offset = 1  # 0
     w_mesh_normal = 0.3  # 0
     w_mesh_curv = 1000  # 0
@@ -94,6 +97,7 @@ if __name__ == "__main__":
             "w_rgb": w_rgb,
             "w_depth": w_depth,
             "w_normals": w_normals,
+            "w_chamfer": w_chamfer,
             "w_offset": w_offset,
             "w_laplacian": w_laplacian,
             "w_meshnormal": w_mesh_normal,
@@ -114,6 +118,7 @@ if __name__ == "__main__":
             "rgb": 0,
             "depth": 0,
             "normals": 0,
+            "chamfer": 0,
             "offset": 0,
             "laplacian": 0,
             "mesh_normal": 0,
@@ -131,7 +136,7 @@ if __name__ == "__main__":
             batch = [data.to(device) for data in batch]
             rgb, depth, normals, offsets = batch
             mask = depth > 0
-            pred_dfm_vtx, pred_offsets, _ = model(rgb, depth, normals)
+            pred_dfm_vtx, pred_offsets, _ = model(normals, rgb, depth)
 
             # differentiable rendering the predicted mesh
             dfm_mesh = cano_mesh.offset_verts(pred_offsets.reshape(-1, 3))
@@ -190,6 +195,10 @@ if __name__ == "__main__":
                 * mask[:, 0, :, :]
             )
 
+            gt_sample = sample_points_from_meshes(gt_mesh, 5000)
+            dfm_sample = sample_points_from_meshes(dfm_mesh, 5000)
+            chamfer_loss, _ = chamfer_distance(gt_sample, dfm_sample)
+
             offset_loss = torch.mean(
                 ((offsets - pred_offsets) ** 2).sum(-1).sqrt()
             )
@@ -225,6 +234,7 @@ if __name__ == "__main__":
                 w_rgb * rgb_loss
                 + w_depth * depth_loss
                 + w_normals * normals_loss
+                + w_chamfer * chamfer_loss
                 + w_offset * offset_loss
                 + w_laplacian * laplacian_loss
                 + w_mesh_normal * mesh_normal_loss
@@ -239,6 +249,7 @@ if __name__ == "__main__":
             total_loss["rgb"] += rgb_loss.item() * n_batch_data
             total_loss["depth"] += depth_loss.item() * n_batch_data
             total_loss["normals"] += normals_loss.item() * n_batch_data
+            total_loss["chamfer"] += chamfer_loss.item() * n_batch_data
             total_loss["offset"] += offset_loss.item() * n_batch_data
             total_loss["laplacian"] += laplacian_loss.item() * n_batch_data
             total_loss["mesh_normal"] += mesh_normal_loss.item() * n_batch_data
@@ -253,6 +264,7 @@ if __name__ == "__main__":
                 writer.add_scalar(
                     "train/normals_loss", normals_loss.item(), step
                 )
+                writer.add_scalar("train/chamfer_loss", chamfer_loss.item(), step)
                 writer.add_scalar("train/offset_loss", offset_loss.item(), step)
                 writer.add_scalar(
                     "train/laplacian_loss", laplacian_loss.item(), step
@@ -272,6 +284,7 @@ if __name__ == "__main__":
             "rgb": 0,
             "depth": 0,
             "normals": 0,
+            "chamfer": 0,
             "offset": 0,
             "laplacian": 0,
             "mesh_normal": 0,
@@ -288,9 +301,9 @@ if __name__ == "__main__":
                 rgb, depth, normals, offsets = batch
                 mask = depth > 0
                 pred_dfm_vtx, pred_offsets, _ = model(
+                    normals,
                     rgb,
                     depth,
-                    normals,
                 )
 
                 # differentiable rendering the predicted mesh
@@ -364,6 +377,10 @@ if __name__ == "__main__":
                         normals, pred_normals, dim=1
                     )).pow(2) * mask[:, 0, :, :]
                 )
+                gt_sample = sample_points_from_meshes(gt_mesh, 5000)
+                dfm_sample = sample_points_from_meshes(dfm_mesh, 5000)
+                chamfer_loss, _ = chamfer_distance(gt_sample, dfm_sample)
+
                 offset_loss = torch.mean(
                     ((offsets - pred_offsets) ** 2).sum(-1).sqrt()
                 )
@@ -399,6 +416,7 @@ if __name__ == "__main__":
                     w_rgb * rgb_loss
                     + w_depth * depth_loss
                     + w_normals * normals_loss
+                    + w_chamfer * chamfer_loss
                     + w_offset * offset_loss
                     + w_laplacian * laplacian_loss
                     + w_mesh_normal * mesh_normal_loss
@@ -410,6 +428,7 @@ if __name__ == "__main__":
                 total_loss["rgb"] += rgb_loss.item() * n_batch_data
                 total_loss["depth"] += depth_loss.item() * n_batch_data
                 total_loss["normals"] += normals_loss.item() * n_batch_data
+                total_loss["chamfer"] += chamfer_loss.item() * n_batch_data
                 total_loss["offset"] += offset_loss.item() * n_batch_data
                 total_loss["laplacian"] += laplacian_loss.item() * n_batch_data
                 total_loss["mesh_normal"] += (
