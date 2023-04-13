@@ -494,9 +494,9 @@ class GraphConvDeformNet(nn.Module):
         if use_depth:
             self.depth_encoder = Resnet18(
                 c_dim=self.c_dim,
-                normalize=False,
+                normalize=True,
+                pretrained=True,
                 use_linear=True,
-                pretrained=False,
             )
             self.decoder_input_dim += self.c_dim
         else:
@@ -504,9 +504,9 @@ class GraphConvDeformNet(nn.Module):
         if use_normals:
             self.normals_encoder = Resnet18(
                 c_dim=self.c_dim,
-                normalize=False,
+                normalize=True,
+                pretrained=True,
                 use_linear=True,
-                pretrained=False,
             )
             self.decoder_input_dim += self.c_dim
         else:
