@@ -105,6 +105,13 @@ def get_vertex_covariance(meshes, adjacency_matrix, packed=True):
         return verts_cov.reshape(verts.shape[0], verts.shape[1], 3, 3)
 
 
+def depth2disparity(depth):
+    mask = (depth > 0).to(dtype=depth.dtype)
+    disparity = (1 / depth) * mask
+    disparity = disparity[:, 0, :, :]
+    return disparity
+
+
 def rayleigh_quotient_curvature(meshes, adjacency_matrix):
     """RQ Curvature according to Garnet++
         https://arxiv.org/pdf/2007.10867v1.pdf.

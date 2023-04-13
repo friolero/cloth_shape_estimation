@@ -4,6 +4,60 @@ import torch.nn.functional as F
 from torchvision import models
 
 
+class Embedder(object):
+    # Positional encoding (section 5.1)
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.create_embedding_fn()
+
+    def create_embedding_fn(self):
+        embed_fns = []
+        d = self.kwargs["input_dims"]
+        out_dim = 0
+        if self.kwargs["include_input"]:
+            embed_fns.append(lambda x: x)
+            out_dim += d
+
+        max_freq = self.kwargs["max_freq_log2"]
+        N_freqs = self.kwargs["num_freqs"]
+
+        if self.kwargs["log_sampling"]:
+            freq_bands = 2.0 ** torch.linspace(0.0, max_freq, steps=N_freqs)
+        else:
+            freq_bands = torch.linspace(
+                2.0 ** 0.0, 2.0 ** max_freq, steps=N_freqs
+            )
+
+        for freq in freq_bands:
+            for p_fn in self.kwargs["periodic_fns"]:
+                embed_fns.append(lambda x, p_fn=p_fn, freq=freq: p_fn(x * freq))
+                out_dim += d
+
+        self.embed_fns = embed_fns
+        self.out_dim = out_dim
+
+    def embed(self, inputs):
+        return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
+
+
+def get_embedder(multires, i=0):
+    embed_kwargs = {
+        "include_input": True,
+        "input_dims": 1,
+        "max_freq_log2": multires - 1,
+        "num_freqs": multires,
+        "log_sampling": True,
+        "periodic_fns": [torch.sin, torch.cos],
+    }
+
+    embedder_obj = Embedder(**embed_kwargs)
+
+    def embed(x, eo=embedder_obj):
+        return eo.embed(x)
+
+    return embed, embedder_obj.out_dim
+
+
 def normalize_imagenet(x):
     """Normalize input images according to ImageNet standards.
 
@@ -211,6 +265,7 @@ class DeformNet(nn.Module):
         use_normals=False,
         c_dim=256,
         predict_rgb=False,
+        multires=10,
     ):
         super(DeformNet, self).__init__()
 
@@ -221,21 +276,34 @@ class DeformNet(nn.Module):
         self.decoder_input_dim = self.c_dim
 
         if use_depth:
+            self.embedder, self.depth_out_dim = get_embedder(multires)
             self.depth_encoder = Resnet18(
                 c_dim=self.c_dim,
+                # normalize=True,
+                # pretrained=True,
                 normalize=False,
-                use_linear=True,
                 pretrained=False,
+                use_linear=True,
+            )
+            self.depth_encoder.features.conv1 = nn.Conv2d(
+                self.depth_out_dim,
+                64,
+                kernel_size=(7, 7),
+                stride=(2, 2),
+                padding=(3, 3),
+                bias=False,
             )
             self.decoder_input_dim += self.c_dim
+
         else:
             self.depth_encoder = None
+            self.embedder = None
         if use_normals:
             self.normals_encoder = Resnet18(
                 c_dim=self.c_dim,
-                normalize=False,
+                normalize=True,
                 use_linear=True,
-                pretrained=False,
+                pretrained=True,
             )
             self.decoder_input_dim += self.c_dim
         else:
@@ -261,16 +329,23 @@ class DeformNet(nn.Module):
         # residual_coef = torch.zeros(1)
         # self.residual_coef = nn.Parameter(residual_coef)
 
-    def forward(self, rgb_images, depth_images, normals_images):
+    # def forward(self, rgb_images, depth_images, normals_images):
+    def forward(self, rgb_images, disparity, normals_images):
 
         # encode inputs
         c_bxc = self.rgb_encoder(rgb_images)
-        if self.depth_encoder is not None:
-            depth_feat = self.depth_encoder(depth_images)
-            c_bxc = torch.cat([c_bxc, depth_feat], dim=1)
         if self.normals_encoder is not None:
             normals_feat = self.normals_encoder(normals_images)
             c_bxc = torch.cat([c_bxc, normals_feat], dim=1)
+        # if self.depth_encoder is not None:
+        if self.embedder is not None:
+            bs, h, w = disparity.shape
+            disparity_feat = self.embedder(disparity.reshape(bs, -1))
+            disparity_feat = disparity_feat.reshape(bs, -1, h, w)
+            disparity_feat = self.depth_encoder(disparity_feat)
+            c_bxc = torch.cat([c_bxc, disparity_feat], dim=1)
+            # depth_feat = self.depth_encoder(depth_images)
+            # c_bxc = torch.cat([c_bxc, depth_feat], dim=1)
 
         # decode prediction
         pred = self.decoder(self.tplt_vtx, c=c_bxc)

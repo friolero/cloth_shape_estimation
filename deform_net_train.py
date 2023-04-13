@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from data_utils import (
     compute_vertex_normals,
+    depth2disparity,
     get_adjacency_matrix,
     get_riemannian_metric,
     load_wavefront_file,
@@ -20,7 +21,8 @@ from data_utils import (
 from deform_dataset import DeformDataset
 from deform_net import DeformNet
 from differentiable_rendering import CameraInterface, init_lighting
-from graph_conv_deform_net import GraphConvDeformNet
+
+# from graph_conv_deform_net import GraphConvDeformNet
 
 if __name__ == "__main__":
 
@@ -80,10 +82,11 @@ if __name__ == "__main__":
     lr = 1e-4
     betas = (0.9, 0.999)
     lr_scheduler_patience = 3
-    # model = DeformNet(cano_verts, use_depth=True, use_normals=True).to(device)
-    model = GraphConvDeformNet(
-        cano_verts, adjacency_mtx, use_depth=True, use_normals=True
-    ).to(device)
+    model = DeformNet(cano_verts, use_depth=True, use_normals=True, c_dim=256)
+    # model = GraphConvDeformNet(
+    #    cano_verts, adjacency_mtx, use_depth=True, use_normals=True
+    # )
+    model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=betas)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
@@ -96,9 +99,9 @@ if __name__ == "__main__":
     w_laplacian = 0.0  # opposite optimization goal -> not used
     w_chamfer = 0.0  # 1.0 not helpful -> not used
     w_offset = 1
-    w_mesh_normal = 0 #0.3
-    w_mesh_curv = 0 #1000
-    w_riemannian_reg = 0 #100
+    w_mesh_normal = 0.3
+    w_mesh_curv = 1000
+    w_riemannian_reg = 0  # 100
     writer.add_hparams(
         {
             "lr": lr,
@@ -147,8 +150,9 @@ if __name__ == "__main__":
             # model forwarding
             batch = [data.to(device) for data in batch]
             rgb, depth, normals, offsets = batch
+            disparity = depth2disparity(depth)
             mask = depth > 0
-            pred_dfm_vtx, pred_offsets, _ = model(rgb, depth, normals)
+            pred_dfm_vtx, pred_offsets, _ = model(rgb, disparity, normals)
 
             # differentiable rendering the predicted mesh
             dfm_mesh = cano_mesh.offset_verts(pred_offsets.reshape(-1, 3))
@@ -332,10 +336,11 @@ if __name__ == "__main__":
                 # model forwarding
                 batch = [data.to(device) for data in batch]
                 rgb, depth, normals, offsets = batch
+                disparity = depth2disparity(depth)
                 mask = depth > 0
                 pred_dfm_vtx, pred_offsets, _ = model(
                     rgb,
-                    depth,
+                    disparity,
                     normals,
                 )
 
