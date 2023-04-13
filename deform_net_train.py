@@ -52,6 +52,7 @@ if __name__ == "__main__":
     cano_obj_fn = f"{data_dir}/textured_flat_cloth.obj"
     cano_verts, _, _, cano_mesh = load_wavefront_file(cano_obj_fn, device)
     adjacency_mtx = get_adjacency_matrix(cano_mesh)
+    verts_uv = cano_mesh.textures.verts_uvs_list()[0]
     train_ds = DeformDataset(data_dir=data_dir, mode="train")
     train_dl = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, drop_last=True
@@ -152,11 +153,17 @@ if __name__ == "__main__":
             rgb, depth, normals, offsets = batch
             disparity = depth2disparity(depth)
             mask = depth > 0
-            pred_dfm_vtx, pred_offsets, _ = model(rgb, disparity, normals)
+            gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
+
+            pred_dfm_vtx, pred_offsets, _ = model(
+                rgb,
+                disparity,
+                normals,
+                verts_uv,
+            )
 
             # differentiable rendering the predicted mesh
             dfm_mesh = cano_mesh.offset_verts(pred_offsets.reshape(-1, 3))
-            gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
             tgt_render = camera.render(dfm_mesh)
             if idx == 0:
                 with torch.no_grad():
@@ -338,15 +345,16 @@ if __name__ == "__main__":
                 rgb, depth, normals, offsets = batch
                 disparity = depth2disparity(depth)
                 mask = depth > 0
+                gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
                 pred_dfm_vtx, pred_offsets, _ = model(
                     rgb,
                     disparity,
                     normals,
+                    verts_uv,
                 )
 
                 # differentiable rendering the predicted mesh
                 dfm_mesh = cano_mesh.offset_verts(pred_offsets.reshape(-1, 3))
-                gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
                 if idx == 0:
                     tgt_render = camera.render(
                         dfm_mesh,
