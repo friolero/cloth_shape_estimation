@@ -40,10 +40,10 @@ class Embedder(object):
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
 
-def get_embedder(multires, i=0):
+def get_embedder(multires, input_dims, i=0):
     embed_kwargs = {
         "include_input": True,
-        "input_dims": 1,
+        "input_dims": input_dims,
         "max_freq_log2": multires - 1,
         "num_freqs": multires,
         "log_sampling": True,
@@ -282,7 +282,7 @@ class DeformNet(nn.Module):
         self.decoder_input_dim = self.c_dim
 
         if use_depth:
-            self.embedder, self.depth_out_dim = get_embedder(multires)
+            self.embedder, self.depth_out_dim = get_embedder(multires, input_dims=1)
             self.depth_encoder = Resnet18(
                 c_dim=self.c_dim,
                 # normalize=True,
@@ -409,8 +409,8 @@ class DeformNet(nn.Module):
         else:
             self.normals_encoder = None
 
-        self.embedder, self.embed_out_dim = get_embedder(multires)
-        self.decoder_input_dim += 2 * self.embed_out_dim
+        self.embedder, self.embed_out_dim = get_embedder(multires, input_dims=2)
+        self.decoder_input_dim += self.embed_out_dim
 
         out_dim = 3
         decoder = Decoder(
