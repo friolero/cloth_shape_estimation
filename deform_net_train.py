@@ -10,14 +10,9 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from data_utils import (
-    compute_vertex_normals,
-    depth2disparity,
-    get_adjacency_matrix,
-    get_riemannian_metric,
-    load_wavefront_file,
-    rayleigh_quotient_curvature,
-)
+from data_utils import (compute_vertex_normals, depth2disparity,
+                        get_adjacency_matrix, get_riemannian_metric,
+                        load_wavefront_file, rayleigh_quotient_curvature)
 from deform_dataset import DeformDataset
 from deform_net import DeformNet
 from differentiable_rendering import CameraInterface, init_lighting
@@ -53,7 +48,7 @@ if __name__ == "__main__":
     cano_verts, _, _, cano_mesh = load_wavefront_file(cano_obj_fn, device)
     adjacency_mtx = get_adjacency_matrix(cano_mesh)
     verts_uv = cano_mesh.textures.verts_uvs_list()[0]
-    train_ds = DeformDataset(data_dir=data_dir, mode="train")
+    train_ds = DeformDataset(data_dir=data_dir, mode="test")
     train_dl = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, drop_last=True
     )
@@ -83,7 +78,14 @@ if __name__ == "__main__":
     lr = 1e-4
     betas = (0.9, 0.999)
     lr_scheduler_patience = 3
-    model = DeformNet(cano_verts, use_depth=True, use_normals=True, c_dim=256)
+    model = DeformNet(
+        cano_verts,
+        use_depth=True,
+        embed_depth=False,
+        use_normals=True,
+        embed_normals=False,
+        embed_uv=True,
+        c_dim=256)
     # model = GraphConvDeformNet(
     #    cano_verts, adjacency_mtx, use_depth=True, use_normals=True
     # )
@@ -155,7 +157,7 @@ if __name__ == "__main__":
             mask = depth > 0
             gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
 
-            pred_dfm_vtx, pred_offsets, _ = model(
+            pred_dfm_vtx, pred_offsets = model(
                 rgb,
                 disparity,
                 normals,
@@ -346,7 +348,7 @@ if __name__ == "__main__":
                 disparity = depth2disparity(depth)
                 mask = depth > 0
                 gt_mesh = cano_mesh.offset_verts(offsets.reshape(-1, 3))
-                pred_dfm_vtx, pred_offsets, _ = model(
+                pred_dfm_vtx, pred_offsets = model(
                     rgb,
                     disparity,
                     normals,

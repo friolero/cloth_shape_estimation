@@ -262,115 +262,15 @@ class Decoder(nn.Module):
         return out_bxpxc
 
 
-"""
 class DeformNet(nn.Module):
     def __init__(
         self,
         tplt_vtx,
         use_depth=False,
+        embed_depth=False,
         use_normals=False,
-        c_dim=256,
-        predict_rgb=False,
-        multires=10,
-    ):
-        super(DeformNet, self).__init__()
-
-        self.c_dim = c_dim
-        self.rgb_encoder = Resnet18(
-            c_dim=self.c_dim, normalize=True, use_linear=True, pretrained=True
-        )
-        self.decoder_input_dim = self.c_dim
-
-        if use_depth:
-            self.embedder, self.depth_out_dim = get_embedder(multires, input_dims=1)
-            self.depth_encoder = Resnet18(
-                c_dim=self.c_dim,
-                # normalize=True,
-                # pretrained=True,
-                normalize=False,
-                pretrained=True,
-                use_linear=True,
-            )
-            self.depth_encoder.features.conv1 = nn.Conv2d(
-                self.depth_out_dim,
-                64,
-                kernel_size=(7, 7),
-                stride=(2, 2),
-                padding=(3, 3),
-                bias=False,
-            )
-            self.decoder_input_dim += self.c_dim
-
-        else:
-            self.depth_encoder = None
-            self.embedder = None
-        if use_normals:
-            self.normals_encoder = Resnet18(
-                c_dim=self.c_dim,
-                normalize=True,
-                use_linear=True,
-                pretrained=True,
-            )
-            self.decoder_input_dim += self.c_dim
-        else:
-            self.normals_encoder = None
-
-        out_dim = 3
-        self.predict_rgb = predict_rgb
-        if predict_rgb:
-            out_dim += 3
-        decoder = Decoder(
-            dim=3,
-            c_dim=self.decoder_input_dim,
-            leaky=True,
-            out_dim=out_dim,
-            res0=True,
-            res0ini=torch.ones,
-        )
-        self.decoder = decoder
-
-        self.tplt_vtx = nn.Parameter(tplt_vtx, requires_grad=False)
-
-    # def forward(self, rgb_images, depth_images, normals_images):
-    def forward(self, rgb_images, disparity, normals_images):
-
-        # encode inputs
-        c_bxc = self.rgb_encoder(rgb_images)
-        if self.normals_encoder is not None:
-            normals_feat = self.normals_encoder(normals_images)
-            c_bxc = torch.cat([c_bxc, normals_feat], dim=1)
-        if self.depth_encoder is not None:
-            bs, h, w = disparity.shape
-            disparity_feat = self.embedder(disparity.reshape(bs, -1))
-            disparity_feat = disparity_feat.reshape(bs, -1, h, w)
-            disparity_feat = self.depth_encoder(disparity_feat)
-            c_bxc = torch.cat([c_bxc, disparity_feat], dim=1)
-            # depth_feat = self.depth_encoder(
-            #    disparity.unsqueeze(1).repeat([1, 3, 1, 1])
-            # )
-            # c_bxc = torch.cat([c_bxc, depth_feat], dim=1)
-
-        # decode prediction
-        pred = self.decoder(self.tplt_vtx, c=c_bxc)
-        delta_vtx = pred[:, :, :3]  # offset
-        # p = scale.unsqueeze(1) * self.tplt_vtx + self.residual_coef * delta_vtx
-        p = self.tplt_vtx + delta_vtx
-
-        # optional color prediction
-        if self.predict_rgb:
-            rgb = F.sigmoid(pred[:, :, 3:6])  # color as texture
-            return p, delta_vtx, rgb
-        else:
-            return p, delta_vtx, None
-"""
-
-
-class DeformNet(nn.Module):
-    def __init__(
-        self,
-        tplt_vtx,
-        use_depth=False,
-        use_normals=False,
+        embed_normals=False,
+        embed_uv=True,
         c_dim=256,
         multires=10,
     ):
@@ -384,6 +284,8 @@ class DeformNet(nn.Module):
         )
         self.decoder_input_dim = self.c_dim
 
+        self.depth_encoder = None
+        self.depth_embedder = None
         if use_depth:
             self.depth_encoder = Resnet18(
                 c_dim=self.c_dim,
@@ -394,23 +296,47 @@ class DeformNet(nn.Module):
                 use_linear=True,
             )
             self.decoder_input_dim += self.c_dim
+            if embed_depth:
+                self.depth_embedder, self.depth_out_dim = get_embedder(
+                    multires, input_dims=1
+                )
+                self.depth_encoder.features.conv1 = nn.Conv2d(
+                    self.depth_out_dim,
+                    64,
+                    kernel_size=(7, 7),
+                    stride=(2, 2),
+                    padding=(3, 3),
+                    bias=False,
+                )
 
-        else:
-            self.depth_encoder = None
-            # self.embedder = None
+        self.normals_encoder = None
+        self.normals_embedder = None
         if use_normals:
             self.normals_encoder = Resnet18(
                 c_dim=self.c_dim,
-                normalize=True,
+                normalize=False,
                 use_linear=True,
                 pretrained=True,
             )
             self.decoder_input_dim += self.c_dim
-        else:
-            self.normals_encoder = None
+            if embed_normals:
+                self.normals_embedder, self.normals_out_dim = get_embedder(
+                    multires, input_dims=3
+                )
+                self.normals_encoder.features.conv1 = nn.Conv2d(
+                    self.normals_out_dim,
+                    64,
+                    kernel_size=(7, 7),
+                    stride=(2, 2),
+                    padding=(3, 3),
+                    bias=False,
+                )
 
-        self.embedder, self.embed_out_dim = get_embedder(multires, input_dims=2)
-        self.decoder_input_dim += self.embed_out_dim
+        if embed_uv:
+            self.uv_embedder, self.uv_out_dim = get_embedder(
+                multires, input_dims=2
+            )
+            self.decoder_input_dim += self.uv_out_dim
 
         out_dim = 3
         decoder = Decoder(
@@ -428,23 +354,46 @@ class DeformNet(nn.Module):
         # encode inputs
         global_feat = self.rgb_encoder(rgb_images)
         if self.normals_encoder is not None:
-            normals_feat = self.normals_encoder(normals_images)
+            if self.normals_embedder is not None:
+                bs, _, h, w = normals_images.shape
+                normals_feat = self.normals_embedder(
+                    normals_images.permute([0, 2, 3, 1]).reshape(bs * h * w, 3)
+                )
+                normals_feat = normals_feat.reshape(
+                    bs, h, w, self.normals_out_dim
+                ).permute([0, 3, 1, 2])
+            else:
+                normals_feat = normals_images
+            normals_feat = self.normals_encoder(normals_feat)
             global_feat = torch.cat([global_feat, normals_feat], dim=1)
         if self.depth_encoder is not None:
-            depth_feat = self.depth_encoder(
-                disparity.unsqueeze(1).repeat([1, 3, 1, 1])
-            )
-            global_feat = torch.cat([global_feat, depth_feat], dim=1)
+            if self.depth_embedder is not None:
+                bs, h, w = disparity.shape
+                disparity_feat = self.depth_embedder(
+                    disparity.reshape(bs * h * w, 1)
+                )
+                disparity_feat = disparity_feat.reshape(
+                    bs, h, w, self.depth_out_dim
+                ).permute([0, 3, 1, 2])
+            else:
+                disparity_feat = disparity.unsqueeze(1).repeat([1, 3, 1, 1])
+            disparity_feat = self.depth_encoder(disparity_feat)
+            global_feat = torch.cat([global_feat, disparity_feat], dim=1)
         global_feat = global_feat.unsqueeze(1).repeat(
             [1, verts_uv.shape[0], 1]
         )  # B, N, 256 * 3
 
-        verts_uv = self.embedder(verts_uv)  # N, 42
-        verts_uv = verts_uv.unsqueeze(0).repeat([global_feat.shape[0], 1, 1])
-        enc_feat = torch.cat([global_feat, verts_uv], dim=-1)
+        if self.uv_embedder is not None:
+            verts_uv = self.uv_embedder(verts_uv)  # N, 42
+            verts_uv = verts_uv.unsqueeze(0).repeat(
+                [global_feat.shape[0], 1, 1]
+            )
+            enc_feat = torch.cat([global_feat, verts_uv], dim=-1)
+        else:
+            enc_feat = global_feat
 
         # decode prediction
         delta_vtx = self.decoder(self.tplt_vtx, c=enc_feat)
         p = self.tplt_vtx + delta_vtx
 
-        return p, delta_vtx, None
+        return p, delta_vtx
