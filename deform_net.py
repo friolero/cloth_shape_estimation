@@ -332,6 +332,7 @@ class DeformNet(nn.Module):
                     bias=False,
                 )
 
+        self.uv_embedder = None
         if embed_uv:
             self.uv_embedder, self.uv_out_dim = get_embedder(
                 multires, input_dims=2

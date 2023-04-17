@@ -10,9 +10,14 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from data_utils import (compute_vertex_normals, depth2disparity,
-                        get_adjacency_matrix, get_riemannian_metric,
-                        load_wavefront_file, rayleigh_quotient_curvature)
+from data_utils import (
+    compute_vertex_normals,
+    depth2disparity,
+    get_adjacency_matrix,
+    get_riemannian_metric,
+    load_wavefront_file,
+    rayleigh_quotient_curvature,
+)
 from deform_dataset import DeformDataset
 from deform_net import DeformNet
 from differentiable_rendering import CameraInterface, init_lighting
@@ -48,7 +53,7 @@ if __name__ == "__main__":
     cano_verts, _, _, cano_mesh = load_wavefront_file(cano_obj_fn, device)
     adjacency_mtx = get_adjacency_matrix(cano_mesh)
     verts_uv = cano_mesh.textures.verts_uvs_list()[0]
-    train_ds = DeformDataset(data_dir=data_dir, mode="test")
+    train_ds = DeformDataset(data_dir=data_dir, mode="train")
     train_dl = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True, drop_last=True
     )
@@ -81,11 +86,12 @@ if __name__ == "__main__":
     model = DeformNet(
         cano_verts,
         use_depth=True,
-        embed_depth=False,
+        embed_depth=True,
         use_normals=True,
-        embed_normals=False,
+        embed_normals=False,  # True,
         embed_uv=True,
-        c_dim=256)
+        c_dim=256,
+    )
     # model = GraphConvDeformNet(
     #    cano_verts, adjacency_mtx, use_depth=True, use_normals=True
     # )
@@ -288,9 +294,7 @@ if __name__ == "__main__":
             total_loss["offset"] += offset_loss.item() * n_batch_data
             total_loss["laplacian"] += laplacian_loss.item() * n_batch_data
             total_loss["mesh_normal"] += mesh_normal_loss.item() * n_batch_data
-            total_loss["mesh_curvature"] += (
-                mesh_normal_loss.item() * n_batch_data
-            )
+            total_loss["mesh_curvature"] += mesh_curv_loss.item() * n_batch_data
             total_loss["riemannian_reg"] += (
                 riemannian_reg_loss.item() * n_batch_data
             )
@@ -497,7 +501,7 @@ if __name__ == "__main__":
                     mesh_normal_loss.item() * n_batch_data
                 )
                 total_loss["mesh_curvature"] += (
-                    mesh_normal_loss.item() * n_batch_data
+                    mesh_curv_loss.item() * n_batch_data
                 )
                 total_loss["riemannian_reg"] += (
                     riemannian_reg_loss.item() * n_batch_data
