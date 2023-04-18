@@ -122,14 +122,14 @@ if __name__ == "__main__":
 
     n_iter = 2000
     plot_period = n_iter - 1
-    mask_tgt = True
+    mask_tgt = False  # True
     w_rgb = 1.0
     w_depth = 2.0
     w_normals = 2.0
-    w_chamfer = 2.0
+    w_chamfer = 1
     w_edge = 0.0  # not effective
-    w_mesh_normal = 0.01
-    w_laplacian = 0  # 0.1
+    w_mesh_normal = 0  # 0.01
+    w_laplacian = 0.01  # 0.1
     rgb_losses = []
     depth_losses = []
     normals_losses = []
@@ -137,12 +137,12 @@ if __name__ == "__main__":
     laplacian_losses = []
     edge_losses = []
     mesh_normal_losses = []
-    loop = tqdm(range(n_iter))
 
     for init_name, dfm_verts in init_verts.items():
 
-        optimizer = torch.optim.Adam([dfm_verts], lr=0.001)
+        optimizer = torch.optim.Adam([dfm_verts], lr=0.0001)
 
+        loop = tqdm(range(n_iter))
         for i in loop:
 
             dfm_mesh = tplt_mesh.offset_verts(dfm_verts)
@@ -166,8 +166,8 @@ if __name__ == "__main__":
             loss_depth = diff_depth.mean()
             loss_normals = diff_normals.mean()
 
-            tgt_sample = sample_points_from_meshes(tgt_mesh, 5000)
-            dfm_sample = sample_points_from_meshes(dfm_mesh, 5000)
+            tgt_sample = sample_points_from_meshes(tgt_mesh, 50000)
+            dfm_sample = sample_points_from_meshes(dfm_mesh, 50000)
 
             loss_chamfer, _ = chamfer_distance(tgt_sample, dfm_sample)
             loss_edge = mesh_edge_loss(dfm_mesh)
@@ -214,6 +214,6 @@ if __name__ == "__main__":
                     )
                 print(f"Rendered image saved to {save_prefix}")
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
