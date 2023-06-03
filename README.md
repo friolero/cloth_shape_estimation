@@ -1,5 +1,10 @@
 # cloth_shape_estimation
 
+![](vis/results.png)
+
+![](vis/results_vis2.png)
+
+
 
 ## Dependencies
 
